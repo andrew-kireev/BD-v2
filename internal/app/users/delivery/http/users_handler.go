@@ -3,10 +3,12 @@ package http
 import (
 	"BD-v2/internal/app/users"
 	"BD-v2/internal/app/users/models"
+	allModels "BD-v2/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/jackc/pgconn"
 	"io/ioutil"
 	"net/http"
 )
@@ -21,6 +23,8 @@ func NewUsersHandler(r *mux.Router, rep users.Repository) *UsersHandler {
 	}
 
 	r.HandleFunc("/api/user/{nickname}/create", usersHandler.CreateUser).Methods(http.MethodPost)
+	r.HandleFunc("/api/user/{nickname}/profile", usersHandler.HandlerGetUser).Methods(http.MethodGet)
+	r.HandleFunc("/api/user/{nickname}/profile", usersHandler.UpdateUser).Methods(http.MethodPost)
 
 	return usersHandler
 }
@@ -63,5 +67,82 @@ func (userHandler *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Reque
 	}
 	respBody, _ := user.MarshalJSON()
 	w.WriteHeader(http.StatusCreated)
+	w.Write(respBody)
+}
+
+func (handler *UsersHandler) HandlerGetUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	nickname, ok := vars["nickname"]
+	if !ok {
+		fmt.Println("не шмогли достать nickname")
+		w.WriteHeader(500)
+		return
+	}
+
+	user, err := handler.UsersRep.FindUserNickname(context.Background(), nickname)
+	if err != nil {
+		w.WriteHeader(404)
+		fmt.Println("Нет такого юзера")
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Can't find user with nickname %s", nickname),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
+	}
+	w.WriteHeader(200)
+	body, _ := user.MarshalJSON()
+	w.Write(body)
+}
+
+func (userHandler *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Println("Ошибка чтения body")
+		return
+	}
+	vars := mux.Vars(r)
+	nickname, ok := vars["nickname"]
+	if !ok {
+		fmt.Println("не шмогли достать nickname")
+		w.WriteHeader(500)
+		return
+	}
+	user := &models.User{}
+	user.Nickname = nickname
+	err = user.UnmarshalJSON(body)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Println("Ошибка распаковки json")
+		return
+	}
+
+	user, err = userHandler.UsersRep.UpdateUser(context.Background(), user)
+	if err != nil {
+		if err, ok := err.(*pgconn.PgError); ok {
+			if err.Code == "23505" {
+				w.WriteHeader(409)
+				resp, _ := allModels.FailedResponse{
+					Message: fmt.Sprintf("Уже существует %s", nickname),
+				}.MarshalJSON()
+				w.Write(resp)
+				return
+			}
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут юзера найти %s", nickname),
+			}.MarshalJSON()
+			w.Write(resp)
+		} else {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут юзера найти %s", nickname),
+			}.MarshalJSON()
+			w.Write(resp)
+		}
+		return
+	}
+	respBody, _ := user.MarshalJSON()
+	w.WriteHeader(200)
 	w.Write(respBody)
 }

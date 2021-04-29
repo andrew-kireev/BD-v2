@@ -45,3 +45,24 @@ func (rep *UsersRepository) CheckIfUserExist(ctx context.Context,
 	}
 	return existedUsers, nil
 }
+
+func (rep *UsersRepository) FindUserNickname(ctx context.Context, nickname string) (*models.User, error) {
+	query := `select nickname, fullname, about, email from users
+		where nickname = $1`
+	user := &models.User{}
+
+	err := rep.DBPool.QueryRow(ctx, query, nickname).Scan(&user.Nickname, &user.FullName,
+		&user.About, &user.Email)
+	return user, err
+}
+
+func (rep *UsersRepository) UpdateUser(ctx context.Context, user *models.User) (*models.User, error) {
+	query := `update users set fullname = COALESCE(NULLIF($1, ''), fullname),
+		email = COALESCE(NULLIF($2, ''), email),
+		about = COALESCE(NULLIF($3, ''), about)
+		where nickname = $4 returning nickname, fullname, about, email`
+
+	err := rep.DBPool.QueryRow(ctx, query, user.FullName, user.Email,
+		user.About, user.Nickname).Scan(&user.Nickname, &user.FullName, &user.About, &user.Email)
+	return user, err
+}
