@@ -22,14 +22,14 @@ func NewUsersHandler(r *mux.Router, rep users.Repository) *UsersHandler {
 		UsersRep: rep,
 	}
 
-	r.HandleFunc("/api/user/{nickname}/create", usersHandler.CreateUser).Methods(http.MethodPost)
+	r.HandleFunc("/api/user/{nickname}/create", usersHandler.HandlerCreateUser).Methods(http.MethodPost)
 	r.HandleFunc("/api/user/{nickname}/profile", usersHandler.HandlerGetUser).Methods(http.MethodGet)
 	r.HandleFunc("/api/user/{nickname}/profile", usersHandler.UpdateUser).Methods(http.MethodPost)
 
 	return usersHandler
 }
 
-func (userHandler *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+func (userHandler *UsersHandler) HandlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(500)
