@@ -11,8 +11,20 @@ create table if not exists users
 create table if not exists forums
 (
     title   text   not null,
-    useers     citext not null references users (nickname),
+    useers  citext not null references users (nickname),
     slug    citext not null primary key,
     posts   int default 0,
     threads int default 0
+);
+
+create table if not exists threads
+(
+    id      serial primary key,
+    title   text   not null,
+    author  citext not null references users (nickname),
+    forum   citext not null references forums (slug),
+    message text   not null,
+    votes   int                      default 0,
+    slug    citext unique,
+    created timestamp with time zone default now()
 );

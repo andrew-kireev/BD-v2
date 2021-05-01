@@ -30,3 +30,16 @@ func (rep *ForumRepository) GetForumSlug(slug string) (*models.Forum, error) {
 
 	return forum, err
 }
+
+func (rep *ForumRepository) ClearDB() error {
+	query := `TRUNCATE TABLE users CASCADE;
+		TRUNCATE TABLE forums CASCADE;
+		TRUNCATE TABLE threads CASCADE;`
+
+	_, err := rep.db.Exec(query)
+	return err
+}
+
+//func (rep *ForumRepository) GetTreadds() ([]*models2.Thread, error) {
+//
+//}
