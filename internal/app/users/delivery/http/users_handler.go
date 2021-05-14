@@ -31,6 +31,7 @@ func NewUsersHandler(r *mux.Router, rep users.Repository) *UsersHandler {
 
 func (userHandler *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Println("Ошибка чтения body")
@@ -96,6 +97,7 @@ func (handler *UsersHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 func (userHandler *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Println("Ошибка чтения body")

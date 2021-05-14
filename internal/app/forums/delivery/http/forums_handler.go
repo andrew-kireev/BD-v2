@@ -33,6 +33,7 @@ func NewForumsHandler(r *mux.Router, rep forums.Repository, userRep users.Reposi
 
 func (handler *ForumsHandler) CreateForum(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Println("Ошибка чтения body")

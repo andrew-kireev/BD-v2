@@ -2,7 +2,11 @@ package repository
 
 import (
 	"BD-v2/internal/app/forums/models"
+	models2 "BD-v2/internal/app/threads/models"
+	"fmt"
+	"github.com/go-openapi/strfmt"
 	"github.com/jmoiron/sqlx"
+	"time"
 )
 
 type ForumRepository struct {
@@ -40,6 +44,40 @@ func (rep *ForumRepository) ClearDB() error {
 	return err
 }
 
-//func (rep *ForumRepository) GetTreadds() ([]*models2.Thread, error) {
-//
-//}
+func (rep *ForumRepository) GetTreads(limit int, forum, since string, desc bool) ([]*models2.Thread, error) {
+	query := `select id, title, author, forum, message, votes, slug, created from threads
+		where forum = $1
+		`
+	if since != "" && desc {
+		query += fmt.Sprintf(" and created <= '%s'", since)
+	} else if since != "" {
+		query += fmt.Sprintf(" and created >= '%s'", since)
+	}
+
+	if desc {
+		query += " order by created desc"
+	} else {
+		query += " order by created"
+	}
+
+	query += fmt.Sprintf(" limit NULLIF(%d, 0)", limit)
+
+	threads := make([]*models2.Thread, 0)
+	rows, err := rep.db.Query(query, forum)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		t := &time.Time{}
+		thread := &models2.Thread{}
+		err = rows.Scan(&thread.ID, &thread.Title,
+			&thread.Author, &thread.Forum, &thread.Message, &thread.Votes,
+			&thread.Slug, t)
+		thread.Created = strfmt.DateTime(t.UTC()).String()
+		threads = append(threads, thread)
+	}
+	return threads, err
+}
+
