@@ -29,6 +29,7 @@ func NewUsersHandler(r *mux.Router, rep users.Repository) *UsersHandler {
 	return usersHandler
 }
 
+
 func (userHandler *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	defer r.Body.Close()

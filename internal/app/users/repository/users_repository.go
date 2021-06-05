@@ -3,6 +3,7 @@ package repository
 import (
 	"BD-v2/internal/app/users/models"
 	"context"
+	"fmt"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -65,4 +66,38 @@ func (rep *UsersRepository) UpdateUser(ctx context.Context, user *models.User) (
 	err := rep.DBPool.QueryRow(ctx, query, user.FullName, user.Email,
 		user.About, user.Nickname).Scan(&user.Nickname, &user.FullName, &user.About, &user.Email)
 	return user, err
+}
+
+func (rep *UsersRepository) GetUsers(limit int, forum, since string, desc bool) ([]*models.User, error) {
+	query := `select u.nickname, u.fullname, u.about, u.email from users u
+left join users_forum uf on u.nickname = uf.nickname
+where uf.slug = $1
+		`
+	if since != "" && desc {
+		query += fmt.Sprintf(" and u.nickname < '%s'", since)
+	} else if since != "" {
+		query += fmt.Sprintf(" and u.nickname > '%s'", since)
+	}
+
+	if desc {
+		query += " order by u.nickname desc"
+	} else {
+		query += " order by u.nickname"
+	}
+
+	query += fmt.Sprintf(" limit NULLIF(%d, 0)", limit)
+
+	users := make([]*models.User, 0)
+	rows, err := rep.DBPool.Query(context.Background(), query, forum)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		user := &models.User{}
+		err = rows.Scan(&user.Nickname, &user.FullName, &user.About, &user.Email)
+		users = append(users, user)
+	}
+	return users, err
 }

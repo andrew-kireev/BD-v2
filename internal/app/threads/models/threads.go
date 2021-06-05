@@ -9,6 +9,7 @@ type Thread struct {
 	Votes   int    `json:"votes,omitempty"`
 	Slug    string `json:"slug"`
 	Created string `json:"created"`
+	Path    []int  `json:"path"`
 }
 
 type Vote struct {

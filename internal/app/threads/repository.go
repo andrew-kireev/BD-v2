@@ -10,8 +10,13 @@ type Repository interface {
 	CreateThread(ctx context.Context, thread *models.Thread) (*models.Thread, error)
 	FindThreadSlug(ctx context.Context, slug string) (*models.Thread, error)
 	FindThreadID(ctx context.Context, threadID int) (*models.Thread, error)
-	CreatePost(ctx context.Context, post *models2.Post) (*models2.Post, error)
+	CreatePost(post []*models2.Post, thread *models.Thread) ([]*models2.Post, error)
+	GetPosts(threadID, limit, since int, desc bool) ([]*models2.Post, error)
+	GetPostsTree(threadID, limit, since int, desc bool) ([]*models2.Post, error)
+	GetPostsParentTree(threadID, limit, since int, desc bool) ([]*models2.Post, error)
 	AddVoice(ctx context.Context, voice *models.Vote) error
 	GetVoice(ctx context.Context, voice *models.Vote) (*models.Vote, error)
-	UpdateVoice(ctx context.Context, voice *models.Vote) error
+	UpdateVoice(ctx context.Context, voice *models.Vote) (int, error)
+	UpdateThreadID(ctx context.Context, thread *models.Thread) error
+	UpdateThreadSlug(ctx context.Context, thread *models.Thread) error
 }

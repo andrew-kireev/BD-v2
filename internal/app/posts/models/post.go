@@ -2,7 +2,7 @@ package models
 
 type Post struct {
 	ID       int    `json:"id"`
-	Parent   *int   `json:"-"`
+	Parent   *int   `json:"parent"`
 	Author   string `json:"author"`
 	Message  string `json:"message"`
 	ISEdited bool   `json:"is_edited,omitempty"`

@@ -5,12 +5,15 @@ import (
 	"BD-v2/internal/app/forums/models"
 	"BD-v2/internal/app/users"
 	allModels "BD-v2/internal/models"
+	tools "BD-v2/pkg"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/lib/pq"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 )
 
 type ForumsHandler struct {
@@ -27,6 +30,8 @@ func NewForumsHandler(r *mux.Router, rep forums.Repository, userRep users.Reposi
 	r.HandleFunc("/api/forum/create", forumsHandler.CreateForum).Methods(http.MethodPost)
 	r.HandleFunc("/api/forum/{slug}/details", forumsHandler.GetForum).Methods(http.MethodGet)
 	r.HandleFunc("/api/service/clear", forumsHandler.ClearDB).Methods(http.MethodPost)
+	r.HandleFunc("/api/service/status", forumsHandler.GetStatus).Methods(http.MethodGet)
+	r.HandleFunc("/api/forum/{slug}/users", forumsHandler.GetUsers).Methods(http.MethodGet)
 
 	return forumsHandler
 }
@@ -106,4 +111,45 @@ func (handler *ForumsHandler) ClearDB(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 	}
 	w.WriteHeader(200)
+}
+
+func (handler *ForumsHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	status := handler.forumsRep.GetStatus()
+	respBody, _ := status.MarshalJSON()
+	w.WriteHeader(200)
+	w.Write(respBody)
+}
+
+func (handler *ForumsHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 {
+		limit = 1
+	}
+	desc := tools.ConvertToBool(r.URL.Query().Get("desc"))
+	since := r.URL.Query().Get("since")
+	slug, _ := (mux.Vars(r))["slug"]
+
+	forum, err := handler.forumsRep.GetForumSlug(slug)
+	if err != nil {
+		w.WriteHeader(404)
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Не могут найти форум %s", forum.Slug),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
+	}
+
+	threads, err := handler.UserRep.GetUsers(limit, slug, since, desc)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(404)
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
+	}
+	respBody, _ := json.Marshal(threads)
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
 }

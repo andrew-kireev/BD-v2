@@ -29,10 +29,13 @@ func NewThreadsHandler(r *mux.Router, threadRep threads.Repository,
 		forumRep:  forumRep,
 	}
 
-	r.HandleFunc("/api/thread/{slug}/create", theadHandler.CreatePostsByThreadSlug).Methods(http.MethodPost)
+	r.HandleFunc("/api/thread/{slug}/create", theadHandler.CreatePosts).Methods(http.MethodPost)
 	r.HandleFunc("/api/thread/{slug}/vote", theadHandler.AddVoice).Methods(http.MethodPost)
 	r.HandleFunc("/api/forum/{slug}/create", theadHandler.CrateThread).Methods(http.MethodPost)
 	r.HandleFunc("/api/forum/{slug}/threads", theadHandler.GetTreads).Methods(http.MethodGet)
+	r.HandleFunc("/api/thread/{slug_or_id}/details", theadHandler.GetTread).Methods(http.MethodGet)
+	r.HandleFunc("/api/thread/{slug_or_id}/details", theadHandler.UpdateThread).Methods(http.MethodPost)
+	r.HandleFunc("/api/thread/{slug_or_id}/posts", theadHandler.GetPosts).Methods(http.MethodGet)
 
 	return theadHandler
 }
@@ -122,52 +125,7 @@ func (handler *ThreadsHandler) GetTreads(w http.ResponseWriter, r *http.Request)
 	w.Write(respBody)
 }
 
-func (handler *ThreadsHandler) CreatePostsByThreadID(w http.ResponseWriter, r *http.Request) {
-	slug := r.URL.Query().Get("thread_id")
-	posts := make([]*models2.Post, 0)
-	body, _ := ioutil.ReadAll(r.Body)
-	json.Unmarshal(body, &posts)
-	if len(posts) == 0 {
-		respBody, _ := json.Marshal(posts)
-		w.WriteHeader(http.StatusCreated)
-		w.Write(respBody)
-		return
-	}
-	var err error
-	ctx := context.Background()
-	threadID, _ := strconv.Atoi(slug)
-	thread := &models.Thread{}
-	thread, err = handler.threadRep.FindThreadID(ctx, threadID)
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(404)
-		resp, _ := allModels.FailedResponse{
-			Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
-		}.MarshalJSON()
-		w.Write(resp)
-		return
-	}
-
-	for idx, post := range posts {
-		post.Thread = thread.ID
-		post.Forum = thread.Forum
-		posts[idx], err = handler.threadRep.CreatePost(ctx, post)
-		if err != nil {
-			fmt.Println(err)
-			w.WriteHeader(404)
-			resp, _ := allModels.FailedResponse{
-				Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
-			}.MarshalJSON()
-			w.Write(resp)
-			return
-		}
-	}
-	respBody, _ := json.Marshal(posts)
-	w.WriteHeader(http.StatusCreated)
-	w.Write(respBody)
-}
-
-func (handler *ThreadsHandler) CreatePostsByThreadSlug(w http.ResponseWriter, r *http.Request) {
+func (handler *ThreadsHandler) CreatePosts(w http.ResponseWriter, r *http.Request) {
 	posts := make([]*models2.Post, 0)
 	body, _ := ioutil.ReadAll(r.Body)
 	json.Unmarshal(body, &posts)
@@ -187,7 +145,6 @@ func (handler *ThreadsHandler) CreatePostsByThreadSlug(w http.ResponseWriter, r 
 	} else {
 		thread, err = handler.threadRep.FindThreadID(ctx, threadID)
 	}
-
 	if err != nil {
 		fmt.Println(err)
 		w.WriteHeader(404)
@@ -198,19 +155,15 @@ func (handler *ThreadsHandler) CreatePostsByThreadSlug(w http.ResponseWriter, r 
 		return
 	}
 
-	for idx, post := range posts {
-		post.Thread = thread.ID
-		post.Forum = thread.Forum
-		posts[idx], err = handler.threadRep.CreatePost(ctx, post)
-		if err != nil {
-			fmt.Println(err)
-			w.WriteHeader(404)
-			resp, _ := allModels.FailedResponse{
-				Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
-			}.MarshalJSON()
-			w.Write(resp)
-			return
-		}
+	posts, err = handler.threadRep.CreatePost(posts, thread)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(404)
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
 	}
 	respBody, _ := json.Marshal(posts)
 	w.WriteHeader(http.StatusCreated)
@@ -223,7 +176,7 @@ func (handler *ThreadsHandler) AddVoice(w http.ResponseWriter, r *http.Request) 
 	json.Unmarshal(body, &voice)
 
 	vars := mux.Vars(r)
-	slug, _ := vars["slug"]
+	slug := vars["slug"]
 	threadID, err := strconv.Atoi(slug)
 	thread := &models.Thread{}
 	ctx := context.Background()
@@ -243,19 +196,217 @@ func (handler *ThreadsHandler) AddVoice(w http.ResponseWriter, r *http.Request) 
 	}
 	voice.ThreadID = thread.ID
 	err = handler.threadRep.AddVoice(ctx, voice)
+	//updated := false
 	if err != nil {
-		fmt.Print(err)
-		oldVoice := voice.Voice
-		voice, err := handler.threadRep.GetVoice(ctx, voice)
-		if err != nil {
-			fmt.Println(err)
+		if sqlerr, ok := err.(*pgconn.PgError); ok {
+			if sqlerr.Code == "23503" {
+				fmt.Println(err)
+				w.WriteHeader(404)
+				resp, _ := allModels.FailedResponse{
+					Message: fmt.Sprintf("Не могут юзера найти %s", "fds"),
+				}.MarshalJSON()
+				w.Write(resp)
+				return
+			}
 		}
-		if voice.Voice != oldVoice {
-			err = handler.threadRep.UpdateVoice(ctx, voice)
+		_, err := handler.threadRep.UpdateVoice(ctx, voice)
+		if err != nil {
+			fmt.Print(err)
+			respBody, _ := json.Marshal(thread)
+			w.WriteHeader(http.StatusOK)
+			w.Write(respBody)
+			return
+		}
+		//if isUpdated != 0 {
+		//	updated = true
+		//}
+	}
+	//if updated {
+	//	thread.Votes += voice.Voice * 2
+	//} else {
+	//	thread.Votes += voice.Voice
+	//}
+	newThread, _ := handler.threadRep.FindThreadID(ctx, thread.ID)
+	thread.Votes = newThread.Votes
+	respBody, _ := json.Marshal(thread)
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
+}
+
+func (handler *ThreadsHandler) GetTread(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	slug := vars["slug_or_id"]
+	threadID, err := strconv.Atoi(slug)
+	thread := &models.Thread{}
+	ctx := context.Background()
+	if err != nil {
+		thread, err = handler.threadRep.FindThreadSlug(ctx, slug)
+	} else {
+		thread, err = handler.threadRep.FindThreadID(ctx, threadID)
+	}
+
+	if err != nil {
+		w.WriteHeader(404)
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Не могут найти форум %s", slug),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
+	}
+	respBody, _ := json.Marshal(thread)
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
+}
+
+func (handler *ThreadsHandler) UpdateThread(w http.ResponseWriter, r *http.Request) {
+	thread := &models.Thread{}
+	body, _ := ioutil.ReadAll(r.Body)
+	json.Unmarshal(body, &thread)
+
+	vars := mux.Vars(r)
+	slug := vars["slug_or_id"]
+	threadID, err := strconv.Atoi(slug)
+	ctx := context.Background()
+	prevThread := &models.Thread{}
+	if err != nil {
+		prevThread, err = handler.threadRep.FindThreadSlug(ctx, slug)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+		if thread.Title != "" {
+			prevThread.Title = thread.Title
+		}
+		if thread.Message != "" {
+			prevThread.Message = thread.Message
+		}
+		err = handler.threadRep.UpdateThreadSlug(ctx, prevThread)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+	} else {
+		prevThread, err = handler.threadRep.FindThreadID(ctx, threadID)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+		if thread.Title != "" {
+			prevThread.Title = thread.Title
+		}
+		if thread.Message != "" {
+			prevThread.Message = thread.Message
+		}
+		err = handler.threadRep.UpdateThreadID(ctx, prevThread)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
 		}
 	}
-	thread.Votes += voice.Voice
-	respBody, _ := json.Marshal(thread)
+
+	respBody, _ := json.Marshal(prevThread)
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
+}
+
+
+var (
+	counter = 0
+)
+
+func (handler *ThreadsHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 {
+		limit = 100
+	}
+	descSTR := r.URL.Query().Get("desc")
+	if descSTR == "" {
+		fmt.Println("")
+	}
+	desc := tools.ConvertToBool(descSTR)
+	since, err := strconv.Atoi(r.URL.Query().Get("since"))
+	if err != nil {
+		since = 0
+	}
+	sort := r.URL.Query().Get("sort")
+
+	vars := mux.Vars(r)
+	slug := vars["slug_or_id"]
+	threadID, err := strconv.Atoi(slug)
+	thread := &models.Thread{}
+	ctx := context.Background()
+	if err != nil {
+		thread, err = handler.threadRep.FindThreadSlug(ctx, slug)
+	} else {
+		thread, err = handler.threadRep.FindThreadID(ctx, threadID)
+	}
+	if err != nil {
+		w.WriteHeader(404)
+		resp, _ := allModels.FailedResponse{
+			Message: fmt.Sprintf("Не могут найти форум %s", slug),
+		}.MarshalJSON()
+		w.Write(resp)
+		return
+	}
+	if thread.ID != 0 {
+		threadID = thread.ID
+	}
+
+	var posts []*models2.Post
+	if sort == "flat" || sort == "" {
+		posts, err = handler.threadRep.GetPosts(threadID, limit, since, desc)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+	} else if sort == "tree" {
+		posts, err = handler.threadRep.GetPostsTree(threadID, limit, since, desc)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+	} else if sort == "parent_tree" {
+		posts, err = handler.threadRep.GetPostsParentTree(threadID, limit, since, desc)
+		if err != nil {
+			w.WriteHeader(404)
+			resp, _ := allModels.FailedResponse{
+				Message: fmt.Sprintf("Не могут найти форум %s", slug),
+			}.MarshalJSON()
+			w.Write(resp)
+			return
+		}
+	}
+
+	if posts == nil {
+		posts = make([]*models2.Post, 0)
+	}
+
+	respBody, _ := json.Marshal(posts)
 	w.WriteHeader(http.StatusOK)
 	w.Write(respBody)
 }

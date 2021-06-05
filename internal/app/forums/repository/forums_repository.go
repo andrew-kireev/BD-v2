@@ -3,6 +3,7 @@ package repository
 import (
 	"BD-v2/internal/app/forums/models"
 	models2 "BD-v2/internal/app/threads/models"
+	models3 "BD-v2/internal/app/users/models"
 	"fmt"
 	"github.com/go-openapi/strfmt"
 	"github.com/jmoiron/sqlx"
@@ -33,15 +34,6 @@ func (rep *ForumRepository) GetForumSlug(slug string) (*models.Forum, error) {
 	err := rep.db.Get(forum, query, slug)
 
 	return forum, err
-}
-
-func (rep *ForumRepository) ClearDB() error {
-	query := `TRUNCATE TABLE users CASCADE;
-		TRUNCATE TABLE forums CASCADE;
-		TRUNCATE TABLE threads CASCADE;`
-
-	_, err := rep.db.Exec(query)
-	return err
 }
 
 func (rep *ForumRepository) GetTreads(limit int, forum, since string, desc bool) ([]*models2.Thread, error) {
@@ -81,3 +73,61 @@ func (rep *ForumRepository) GetTreads(limit int, forum, since string, desc bool)
 	return threads, err
 }
 
+func (rep *ForumRepository) GetStatus() *models.Status {
+	query1 := `select count(*) from forums`
+	query2 := `select count(*) from posts`
+	query3 := `select count(*) from threads`
+	query4 := `select count(*) from users`
+
+	status := &models.Status{}
+	_ = rep.db.QueryRow(query1).Scan(&status.ForumsAmount)
+	_ = rep.db.QueryRow(query2).Scan(&status.PostsAmount)
+	_ = rep.db.QueryRow(query3).Scan(&status.ThreadsAmount)
+	_ = rep.db.QueryRow(query4).Scan(&status.UsersAmount)
+	return status
+}
+
+func (rep *ForumRepository) ClearDB() error {
+	query1 := `truncate table thread_votes cascade `
+	query2 := `truncate table posts cascade`
+	query3 := `truncate table thread_votes cascade`
+	query4 := `truncate table threads cascade `
+	query5 := `truncate table users cascade`
+
+	_, _ = rep.db.Exec(query1)
+	_, _ = rep.db.Exec(query2)
+	_, _ = rep.db.Exec(query3)
+	_, _ = rep.db.Exec(query4)
+	_, _ = rep.db.Exec(query5)
+	return nil
+}
+
+func (rep *ForumRepository) GetForumUsers(slug, since string, limit int, desc bool) ([]*models3.User, error) {
+	query := `select nickname, fullname, about, email from users
+		left join forums f on users.nickname = f.users
+		where f.slug = $1`
+
+	if desc {
+		query += fmt.Sprintf(` and users.nickname < '%s order by users.nickname desc'`, since)
+	} else if since != "" {
+		query += fmt.Sprintf(` and users.nickname > '%s' order by users.nickname`, since)
+	}
+	query += fmt.Sprintf(` limit %d`, limit)
+
+	fmt.Println(query)
+
+	rows, err := rep.db.Query(query, slug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	existedUsers := make([]*models3.User, 0)
+
+	for rows.Next() {
+		user := &models3.User{}
+		_ = rows.Scan(&user.Nickname, &user.FullName, &user.About, &user.Email)
+
+		existedUsers = append(existedUsers, user)
+	}
+	return existedUsers, nil
+}

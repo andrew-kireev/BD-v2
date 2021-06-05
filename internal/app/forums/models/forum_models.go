@@ -7,3 +7,10 @@ type Forum struct {
 	Posts   int    `json:"posts,omitempty" db:"posts"`
 	Threads int    `json:"threads,omitempty" db:"threads"`
 }
+
+type Status struct {
+	UsersAmount   int `json:"user"`
+	ForumsAmount  int `json:"forum"`
+	ThreadsAmount int `json:"thread"`
+	PostsAmount   int `json:"post"`
+}
