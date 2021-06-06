@@ -11,7 +11,7 @@ create table if not exists users
 create table if not exists forums
 (
     title   text   not null,
-    useers  citext not null references users (nickname),
+    users  citext not null references users (nickname),
     slug    citext not null primary key,
     posts   int default 0,
     threads int default 0
@@ -33,18 +33,6 @@ BEGIN
     return NEW;
 end
 $add_user_to_forum$ LANGUAGE plpgsql;
-
-CREATE TRIGGER thread_insert
-    AFTER INSERT
-    ON threads
-    FOR EACH ROW
-EXECUTE PROCEDURE add_user_to_forum();
-
-CREATE TRIGGER post_insert
-    AFTER INSERT
-    ON posts
-    FOR EACH ROW
-EXECUTE PROCEDURE add_user_to_forum();
 
 create table if not exists threads
 (
@@ -71,22 +59,34 @@ create table if not exists posts
     path      BIGINT[]                 default array []::INTEGER[]
 );
 
+CREATE TRIGGER thread_insert
+    AFTER INSERT
+    ON threads
+    FOR EACH ROW
+EXECUTE PROCEDURE add_user_to_forum();
+
+CREATE TRIGGER post_insert
+    AFTER INSERT
+    ON posts
+    FOR EACH ROW
+EXECUTE PROCEDURE add_user_to_forum();
+
+
 CREATE OR REPLACE FUNCTION update_path() RETURNS TRIGGER AS
 $update_path$
 DECLARE
-    parent_path         BIGINT[];
-    first_parent_thread INT;
+    p_path         BIGINT[];
+    parent_thread INT;
 BEGIN
     IF (NEW.parent IS NULL) THEN
         NEW.path := array_append(new.path, new.id);
     ELSE
-        SELECT path FROM posts WHERE id = new.parent INTO parent_path;
-        SELECT thread FROM posts WHERE id = parent_path[1] INTO first_parent_thread;
-        IF NOT FOUND OR first_parent_thread != NEW.thread THEN
+        SELECT path FROM posts WHERE id = new.parent INTO p_path;
+        SELECT thread FROM posts WHERE id = p_path[1] INTO parent_thread;
+        IF NOT FOUND OR parent_thread != NEW.thread THEN
             RAISE EXCEPTION '99' USING ERRCODE = '00409';
         end if;
-
-        NEW.path := NEW.path || parent_path || new.id;
+        NEW.path := NEW.path || p_path || new.id;
     end if;
     UPDATE forums SET posts=forums.posts + 1 WHERE forums.slug = new.forum;
     RETURN new;
@@ -136,3 +136,43 @@ CREATE TRIGGER edit_vote
     ON thread_votes
     FOR EACH ROW
 EXECUTE PROCEDURE update_votes();
+
+
+CREATE OR REPLACE FUNCTION count_threads()
+    RETURNS TRIGGER AS
+$count_thread$
+BEGIN
+    UPDATE forums
+    SET threads = forums.threads + 1
+    WHERE slug = NEW.forum;
+    RETURN NEW;
+END;
+$count_thread$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS count_thread ON threads;
+CREATE TRIGGER count_thread
+    AFTER INSERT
+    ON threads
+    FOR EACH ROW
+EXECUTE PROCEDURE count_threads();
+
+
+-- Индексы
+
+create index if not exists users_hash_nickname ON users using hash (nickname);
+create index if not exists users_email_hash ON users using hash (email);
+
+create index if not exists threads_hash_slug ON threads using hash (slug);
+create index if not exists threads_hash_id ON threads using hash (id);
+create index if not exists threads_forum_created ON threads (forum, created);
+create index if not exists threads_created ON threads (created);
+
+create index if not exists posts_id_path1 on posts (id, (path[1]));
+create index if not exists posts_thread_id_path_parent on posts (thread, id, (path[1]), parent);
+create index if not exists posts_thread ON posts (thread);
+create index if not exists post_path_id ON posts ((path[1]) DESC, path, id);
+create index if not exists posts_path1 on posts ((path[1]));
+create index if not exists posts_thread_id on posts (thread, id);
+create index if not exists posts_thread_path_id on posts (thread, path, id);
+
+create index if not exists votes on thread_votes (nickname, thread_id);

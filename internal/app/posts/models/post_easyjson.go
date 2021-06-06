@@ -52,7 +52,7 @@ func easyjson5a72dc82DecodeBDV2InternalAppPostsModels(in *jlexer.Lexer, out *Pos
 			out.Author = string(in.String())
 		case "message":
 			out.Message = string(in.String())
-		case "is_edited":
+		case "isEdited":
 			out.ISEdited = bool(in.Bool())
 		case "forum":
 			out.Forum = string(in.String())
@@ -79,14 +79,10 @@ func easyjson5a72dc82EncodeBDV2InternalAppPostsModels(out *jwriter.Writer, in Po
 		out.RawString(prefix[1:])
 		out.Int(int(in.ID))
 	}
-	{
+	if in.Parent != nil {
 		const prefix string = ",\"parent\":"
 		out.RawString(prefix)
-		if in.Parent == nil {
-			out.RawString("null")
-		} else {
-			out.Int(int(*in.Parent))
-		}
+		out.Int(int(*in.Parent))
 	}
 	{
 		const prefix string = ",\"author\":"
@@ -98,8 +94,8 @@ func easyjson5a72dc82EncodeBDV2InternalAppPostsModels(out *jwriter.Writer, in Po
 		out.RawString(prefix)
 		out.String(string(in.Message))
 	}
-	if in.ISEdited {
-		const prefix string = ",\"is_edited\":"
+	{
+		const prefix string = ",\"isEdited\":"
 		out.RawString(prefix)
 		out.Bool(bool(in.ISEdited))
 	}

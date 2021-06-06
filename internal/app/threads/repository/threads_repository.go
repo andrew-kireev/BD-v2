@@ -1,9 +1,13 @@
 package repository
 
 import (
+	models4 "BD-v2/internal/app/forums/models"
 	models2 "BD-v2/internal/app/posts/models"
+	models3 "BD-v2/internal/app/posts/post_related"
 	"BD-v2/internal/app/threads/models"
+	models1 "BD-v2/internal/app/users/models"
 	"context"
+	"database/sql"
 	"fmt"
 	"github.com/go-openapi/strfmt"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -71,10 +75,16 @@ func (rep *ThreadsRepository) FindThreadSlug(ctx context.Context, slug string) (
 	where slug = $1`
 	thread := &models.Thread{}
 	date := time.Time{}
+	nullSlug := sql.NullString{}
 
 	err := rep.DBPool.QueryRow(ctx, query, slug).Scan(&thread.ID, &thread.Title, &thread.Author,
-		&thread.Forum, &thread.Message, &thread.Votes, &thread.Slug, &date,
+		&thread.Forum, &thread.Message, &thread.Votes, &nullSlug, &date,
 	)
+
+	if nullSlug.Valid {
+		thread.Slug = nullSlug.String
+	}
+
 	thread.Created = strfmt.DateTime(date.UTC()).String()
 	return thread, err
 }
@@ -86,10 +96,15 @@ func (rep *ThreadsRepository) FindThreadID(ctx context.Context, threadID int) (*
 
 	thread := &models.Thread{}
 	date := time.Time{}
+	nullSlug := sql.NullString{}
 
 	err := rep.DBPool.QueryRow(ctx, query, threadID).Scan(&thread.ID, &thread.Title, &thread.Author,
-		&thread.Forum, &thread.Message, &thread.Votes, &thread.Slug, &date,
+		&thread.Forum, &thread.Message, &thread.Votes, &nullSlug, &date,
 	)
+
+	if nullSlug.Valid {
+		thread.Slug = nullSlug.String
+	}
 	thread.Created = strfmt.DateTime(date.UTC()).String()
 	return thread, err
 }
@@ -101,40 +116,34 @@ func (rep *ThreadsRepository) CreatePost(posts []*models2.Post, thread *models.T
 		return empty, nil
 	}
 
-	timeCreated := time.Now()
-	valuesNames := make([]string, 0)
-	var values []interface{}
+	created := time.Now()
+	names := make([]string, 0)
+	params := make([]interface{}, 0)
 	i := 1
-	for _, element := range posts {
-		valuesNames = append(valuesNames, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, $%d, $%d)",
-			i, i+1, i+2, i+3, i+4, i+5))
+	for _, item := range posts {
+		names = append(names, fmt.Sprintf(
+			" ($%d, $%d, $%d, $%d, $%d, $%d) ", i, i+1, i+2, i+3, i+4, i+5))
 		i += 6
-		values = append(values, element.Author, timeCreated, element.Message, element.Parent, thread.ID, thread.Forum)
+		params = append(params, item.Author, created, item.Message, item.Parent, thread.ID, thread.Forum)
 	}
-
-	query += strings.Join(valuesNames, ",")
+	query += strings.Join(names, ",")
 	query += " RETURNING author, created, forum, id, is_edited, message, parent, thread"
-	row, err := rep.DBPool.Query(context.Background(), query, values...)
 
+	row, err := rep.DBPool.Query(context.Background(), query, params...)
 	if err != nil {
 		return empty, err
 	}
-	defer func() {
-		if row != nil {
-			row.Close()
-		}
-	}()
+
+	defer row.Close()
 
 	for row.Next() {
 		post := &models2.Post{}
-		var created time.Time
 		err = row.Scan(&post.Author, &created, &post.Forum, &post.ID, &post.ISEdited,
 			&post.Message, &post.Parent, &post.Thread)
-
 		if err != nil {
 			return empty, err
 		}
+
 		post.Created = strfmt.DateTime(created.UTC()).String()
 		empty = append(empty, post)
 	}
@@ -145,18 +154,9 @@ func (rep *ThreadsRepository) GetPosts(threadID, limit, since int, desc bool) ([
 	query := `SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE 
 	thread = $1 `
 
-	if desc {
-		if since > 0 {
-			query += fmt.Sprintf("AND id < %d ", since)
-		}
-		query += `ORDER BY id DESC `
-	} else {
-		if since > 0 {
-			query += fmt.Sprintf("AND id > %d ", since)
-		}
-		query += `ORDER BY id `
-	}
-	query += `LIMIT NULLIF($2, 0)`
+	formSorting(&query, desc, since)
+	query += `limit nullif($2, 0)`
+
 	posts := make([]*models2.Post, 0)
 
 	row, err := rep.DBPool.Query(context.Background(), query, threadID, limit)
@@ -164,12 +164,7 @@ func (rep *ThreadsRepository) GetPosts(threadID, limit, since int, desc bool) ([
 	if err != nil {
 		return posts, err
 	}
-	defer func() {
-		if row != nil {
-			row.Close()
-		}
-	}()
-
+	defer row.Close()
 	for row.Next() {
 		post := &models2.Post{}
 		created := &time.Time{}
@@ -184,37 +179,43 @@ func (rep *ThreadsRepository) GetPosts(threadID, limit, since int, desc bool) ([
 		posts = append(posts, post)
 	}
 	return posts, err
+}
+
+func formSorting(query *string, desc bool, since int) {
+	if desc {
+		if since > 0 {
+			*query += fmt.Sprintf("AND id < %d ", since)
+		}
+		*query += `ORDER BY id DESC `
+	} else {
+		if since > 0 {
+			*query += fmt.Sprintf("AND id > %d ", since)
+		}
+		*query += `ORDER BY id `
+	}
 }
 
 func (rep *ThreadsRepository) GetPostsTree(threadID, limit, since int, desc bool) ([]*models2.Post, error) {
 	var query string
-	sinceQuery := ""
+	prevQuey := ""
 	if since != 0 {
 		if desc {
-			sinceQuery = `AND path < `
+			prevQuey = `AND path < `
 		} else {
-			sinceQuery = `AND path > `
+			prevQuey = `AND path > `
 		}
-		sinceQuery += fmt.Sprintf(`(SELECT path FROM posts WHERE id = %d)`, since)
+		prevQuey += fmt.Sprintf(`(SELECT path FROM posts WHERE id = %d)`, since)
 	}
-	if desc {
-		query = fmt.Sprintf(
-			`SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE thread=$1 %s ORDER BY path DESC, id DESC LIMIT NULLIF($2, 0);`, sinceQuery)
-	} else {
-		query = fmt.Sprintf(
-			`SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE thread=$1 %s ORDER BY path, id LIMIT NULLIF($2, 0);`, sinceQuery)
-	}
-	var posts []*models2.Post
-	row, err := rep.DBPool.Query(context.Background(),query, threadID, limit)
+
+	query = getMainQuery(prevQuey, desc)
+
+	posts := make([]*models2.Post, 0)
+	row, err := rep.DBPool.Query(context.Background(), query, threadID, limit)
 
 	if err != nil {
 		return posts, err
 	}
-	defer func() {
-		if row != nil {
-			row.Close()
-		}
-	}()
+	defer row.Close()
 
 	for row.Next() {
 		post := &models2.Post{}
@@ -231,50 +232,37 @@ func (rep *ThreadsRepository) GetPostsTree(threadID, limit, since int, desc bool
 
 	}
 	return posts, err
+}
+
+func getMainQuery(prevQuey string, desc bool) string {
+	query := "SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts \nWHERE thread=$1 "
+	if desc {
+		query += prevQuey + "ORDER BY path DESC, id DESC LIMIT NULLIF($2, 0);"
+	} else {
+		query += prevQuey + "ORDER BY path, id LIMIT NULLIF($2, 0);"
+	}
+	return query
 }
 
 func (rep *ThreadsRepository) GetPostsParentTree(threadID, limit, since int, desc bool) ([]*models2.Post, error) {
-	var query string
-	sinceQuery := ""
+	prevQuery := ""
 	if since != 0 {
 		if desc {
-			sinceQuery = `AND PATH[1] < `
+			prevQuery = `AND PATH[1] < `
 		} else {
-			sinceQuery = `AND PATH[1] > `
+			prevQuery = `AND PATH[1] > `
 		}
-		sinceQuery += fmt.Sprintf(`(SELECT path[1] FROM posts WHERE id = %d)`, since)
+		prevQuery += fmt.Sprintf(`(SELECT path[1] FROM posts WHERE id = %d)`, since)
 	}
 
-	parentsQuery := fmt.Sprintf(
-		`SELECT id FROM posts WHERE thread = $1 AND parent IS NULL %s`, sinceQuery)
-
-	if desc {
-		parentsQuery += `ORDER BY id DESC`
-		if limit > 0 {
-			parentsQuery += fmt.Sprintf(` LIMIT %d`, limit)
-		}
-		query = fmt.Sprintf(
-			`SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE path[1] IN (%s) ORDER BY path[1] DESC, path, id;`, parentsQuery)
-	} else {
-		parentsQuery += `ORDER BY id`
-		if limit > 0 {
-			parentsQuery += fmt.Sprintf(` LIMIT %d`, limit)
-		}
-		query = fmt.Sprintf(
-			`SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE path[1] IN (%s) ORDER BY path,id;`, parentsQuery)
-	}
-	var posts []*models2.Post
+	query := parentTreeMainQuery(desc, prevQuery, limit)
+	posts := make([]*models2.Post, 0)
 	row, err := rep.DBPool.Query(context.Background(), query, threadID)
-
 	if err != nil {
 		return posts, err
 	}
 
-	defer func() {
-		if row != nil {
-			row.Close()
-		}
-	}()
+	defer row.Close()
 
 	for row.Next() {
 		post := &models2.Post{}
@@ -282,10 +270,10 @@ func (rep *ThreadsRepository) GetPostsParentTree(threadID, limit, since int, des
 
 		err = row.Scan(&post.ID, &post.Author, &post.Message, &post.ISEdited, &post.Forum,
 			&post.Thread, created, &post.Parent)
-
 		if err != nil {
 			return posts, err
 		}
+
 		post.Created = strfmt.DateTime(created.UTC()).String()
 		posts = append(posts, post)
 
@@ -293,6 +281,25 @@ func (rep *ThreadsRepository) GetPostsParentTree(threadID, limit, since int, des
 	return posts, err
 }
 
+func parentTreeMainQuery(desc bool, prevQuery string, limit int) string {
+	query := ""
+	findParentQuery := "SELECT id FROM posts WHERE thread = $1 AND parent IS NULL " + prevQuery + "ORDER BY id"
+	if desc {
+		findParentQuery += " DESC"
+		if limit > 0 {
+			findParentQuery += fmt.Sprintf(` LIMIT %d`, limit)
+		}
+		query = "SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE path[1] IN (" +
+			findParentQuery +  ") ORDER BY path[1] DESC, path, id"
+	} else {
+		if limit > 0 {
+			findParentQuery += fmt.Sprintf(` LIMIT %d`, limit)
+		}
+		query = "SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts WHERE path[1] IN (" +
+			findParentQuery +  ") ORDER BY path,id"
+	}
+	return query
+}
 
 func (rep *ThreadsRepository) AddVoice(ctx context.Context, voice *models.Vote) error {
 	query := `insert into thread_votes (nickname, voice, thread_id) VALUES ($1, $2, $3)`
@@ -336,5 +343,88 @@ func (rep *ThreadsRepository) UpdateThreadSlug(ctx context.Context, thread *mode
 	where slug = $3
 `
 	_, err := rep.DBPool.Exec(ctx, query, thread.Title, thread.Message, thread.Slug)
+	return err
+}
+
+func (rep *ThreadsRepository) GetOnePost(ctx context.Context, postID int, rel []string) (*models3.PostRelated, error) {
+	query := `SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts
+	WHERE id = $1`
+	postRelated := &models3.PostRelated{}
+	post := &models2.Post{}
+	created := &time.Time{}
+
+	err := rep.DBPool.QueryRow(ctx, query, postID).Scan(&post.ID, &post.Author, &post.Message,
+		&post.ISEdited, &post.Forum, &post.Thread, created, &post.Parent)
+	post.Created = strfmt.DateTime(created.UTC()).String()
+	if err != nil {
+		return nil, err
+	}
+	postRelated.Post = post
+
+	if Contains(rel, "user") {
+		user := &models1.User{}
+		query = `select nickname, fullname, about, email from users
+		where nickname = $1`
+
+		err = rep.DBPool.QueryRow(ctx, query, post.Author).Scan(&user.Nickname,
+			&user.FullName, &user.About, &user.Email,
+		)
+		if err != nil {
+			return nil, err
+		}
+		postRelated.Author = user
+	}
+
+	if Contains(rel, "forum") {
+		forum := &models4.Forum{}
+		query = `select title, users, slug, posts, threads from forums
+		where slug = $1`
+
+		err = rep.DBPool.QueryRow(ctx, query, post.Forum).Scan(&forum.Title, &forum.User, &forum.Slug,
+			&forum.Posts, &forum.Threads,
+		)
+		if err != nil {
+			return nil, err
+		}
+		postRelated.Forum = forum
+	}
+
+	if Contains(rel, "thread") {
+		thread, err := rep.FindThreadID(ctx, post.Thread)
+		if err != nil {
+			return nil, err
+		}
+		postRelated.Thread = thread
+	}
+
+	return postRelated, nil
+}
+
+func Contains(a []string, x string) bool {
+	for _, n := range a {
+		if x == n {
+			return true
+		}
+	}
+	return false
+}
+
+func (rep *ThreadsRepository) GetPostByID(ctx context.Context, postID int) (*models2.Post, error) {
+	query := `SELECT id, author, message, is_edited, forum, thread, created, parent FROM posts
+	WHERE id = $1`
+	created := &time.Time{}
+	post := &models2.Post{}
+
+	err := rep.DBPool.QueryRow(ctx, query, postID).Scan(&post.ID, &post.Author, &post.Message,
+		&post.ISEdited, &post.Forum, &post.Thread, created, &post.Parent)
+	post.Created = strfmt.DateTime(created.UTC()).String()
+	return post, err
+}
+
+func (rep *ThreadsRepository) UpdatePost(ctx context.Context, post *models2.Post) error {
+	query := `update posts set message = $1, is_edited = true 
+	where id = $2`
+
+	_, err := rep.DBPool.Exec(ctx, query, post.Message, post.ID)
 	return err
 }

@@ -16,13 +16,14 @@ import (
 	"net/http"
 )
 
+var (
+	settings =  "host=localhost port=5432 user=lera_bd dbname=db password=password sslmode=disable"
+	//settings = "host=localhost port=5432 dbname=lera_bd sslmode=disable"
+)
+
 func main() {
-	pool, err := pgxpool.Connect(context.Background(),
-		"host=localhost port=5432 dbname=lera_bd sslmode=disable",
-	)
-	db, err := sqlx.Connect("postgres",
-		"host=localhost port=5432 dbname=lera_bd sslmode=disable",
-	)
+	pool, err := pgxpool.Connect(context.Background(), settings)
+	db, err := sqlx.Connect("postgres", settings)
 	if err != nil {
 		fmt.Println("Не смогли подключиться к бд")
 	}
@@ -33,7 +34,7 @@ func main() {
 	router := mux.NewRouter()
 	_ = userHandler.NewUsersHandler(router, userRep)
 	_ = forumHandler.NewForumsHandler(router, forumRep, userRep)
-	_ = threadHandler.NewThreadsHandler(router, threadRep, forumRep)
+	_ = threadHandler.NewThreadsHandler(router, threadRep, forumRep, userRep)
 
 	router.Use(middlware.ContentType)
 	http.ListenAndServe(":5000", router)
